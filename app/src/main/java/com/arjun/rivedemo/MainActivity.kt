@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -78,6 +79,8 @@ import app.rive.Result.Loading.zip
 import app.rive.runtime.kotlin.core.ContextAssetLoader
 import app.rive.runtime.kotlin.core.FileAsset
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -122,7 +125,7 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
     val riveWorker = rememberRiveWorker()
 
     val riveFileResult = rememberRiveFile(
-        RiveFileSource.RawRes.from(R.raw.button_v44),
+        RiveFileSource.RawRes.from(R.raw.button_v46),
         riveWorker
     )
 
@@ -139,10 +142,69 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
 
         is Result.Success -> {
 
-            Box(modifier = modifier) {
-                val riveFile = riveFileResult.value
-                val vmi = rememberViewModelInstance(riveFile)
+            val riveFile = riveFileResult.value
+            val vmi = rememberViewModelInstance(riveFile)
 
+
+            Box(
+                modifier = modifier
+                    .fillMaxSize()
+                    .navigationBarsPadding()
+                    .background(Color.White)
+            ) {
+
+                Button(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .navigationBarsPadding()
+                        .padding(24.dp)
+                        .fillMaxWidth(0.9f),
+                    shape = RoundedCornerShape(16.dp),
+                    onClick = {
+                        println("Button pressed $primary")
+                        if (primary) {
+                            // ───────── PRIMARY STATE ─────────
+                                vmi.setString("Button Text", "Continue")
+
+                                vmi.setEnum("Show Lock Icon", "Hide")
+                                vmi.setEnum("Right Cash", "Show")
+                                vmi.setEnum("Right Coin", "Hide")
+                                vmi.setNumber("Currency", 250f)
+
+                        } else {
+                            // ───────── DISABLED STATE ─────────
+                                vmi.setString("Button Text", "Locked")
+
+                                vmi.setEnum("Show Lock Icon", "Show")
+                                vmi.setEnum("Right Cash", "Hide")
+                                vmi.setEnum("Right Coin", "Show")
+                                vmi.setNumber("Currency", 250f)
+
+                        }
+
+                        primary = !primary
+                    },
+                ) {
+                    Text("Toggle Button State")
+                }
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+//                        .background(Color.Red)
+                        .padding(32.dp)
+                        .fillMaxWidth()
+                        .height(105.dp),
+                ) {
+                    Rive(
+                        file = riveFile,
+                        viewModelInstance = vmi,
+                        fit = Fit.Contain(),
+                        playing = true
+                    )
+                }
+            }
 
 //                val lives by vmi.getNumberFlow("Energy_Bar/Lives")
 //                    .collectAsStateWithLifecycle(0f)
@@ -211,104 +273,12 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
 //                            .collect { println("Continue pressed") }
 //                    }
                 }
-
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-//                        modifier = Modifier.padding(16.dp)
-                    ) {
-                        Rive(
-                            file = riveFile,
-                            viewModelInstance = vmi,
-                            fit = Fit.Contain(),
-                            modifier = Modifier
-                                .padding(16.dp)
-                                .background(Color.Red)
-//                                .width(200.dp)
-                                .size(500.dp)
-                                .semantics {
-                                    contentDescription = "Rive UI - Rewards Demo"
-                                },
-                            playing = true,
-                        )
-                    }
-
-
-                    Button(
-                        onClick = {
-                            vmi.fireTrigger("Press")
-                            println("Button pressed $primary")
-
-                            if (primary) {
-                                // ───────── PRIMARY STATE ─────────
-                                vmi.setString("Button Text", "Continue")
-
-                                vmi.setEnum("Show Lock Icon", "Hide")
-                                vmi.setEnum("Right Cash", "Show")
-                                vmi.setEnum("Right Coin", "Hide")
-                                vmi.setNumber("Currency", 250f)
-
-                            } else {
-                                // ───────── DISABLED STATE ─────────
-                                vmi.setString("Button Text", "Locked")
-
-                                vmi.setEnum("Show Lock Icon", "Show")
-                                vmi.setEnum("Right Cash", "Hide")
-                                vmi.setEnum("Right Coin", "Show")
-                                vmi.setNumber("Currency", 250f)
-
-                            }
-
-                            primary = !primary
-                        }
-                    ) {
-                        Text("Toggle Button State")
-                    }
-//                    Row(
-//                        horizontalArrangement = Arrangement.SpaceBetween,
-//                        modifier = Modifier.fillMaxWidth()
-//                    ) {
-//
-//                        Button(
-//                            onClick = {
-//                                vmi.fireTrigger("Button/Pressed")
-//                            },
-//                        ) {
-//                            Text("click to trigger")
-//                        }
-//
-//                        Button(onClick = { showBottomPanel = !showBottomPanel}) {
-//                            Text("Bottom Sheet")
-//                        }
-//                    }
-//                    if (showBottomPanel) {
-//                        RewardsBottomPanel(
-//                            lives,
-//                            energy,
-//                            coins,
-//                            gems,
-//                            winValue,
-////                            winKind,
-//                            onDismiss = { showBottomPanel = false },
-//                            onVmiSetNumber = { property, value ->
-//                                vmi.setNumber(property, value)
-//                            },
-//                            onVmiSetColor = { property, value ->
-//                                vmi.setColor(property, value)
-//                            },
-//                            onVmiSetEnum = { property, value ->
-//                                vmi.setEnum(property, value)
-//                            }
-//                        )
-//                    }
-                }
-            }
         }
     }
 }
+
+
+
 
 @Composable
 fun RiveBottomBarItem(
