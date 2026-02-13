@@ -121,7 +121,7 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
     val riveWorker = rememberRiveWorker()
 
     val riveFileResult = rememberRiveFile(
-        RiveFileSource.RawRes.from(R.raw.button_v41),
+        RiveFileSource.RawRes.from(R.raw.button_v43),
         riveWorker
     )
 
@@ -141,28 +141,6 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
             Box(modifier = modifier) {
                 val riveFile = riveFileResult.value
                 val vmi = rememberViewModelInstance(riveFile)
-
-
-                val images = listOf(
-                    R.raw.ic_cash,
-                    R.raw.ic_coin1,
-                )
-                val context = LocalContext.current
-
-
-
-                val imageAssets = images.map { resId ->
-                    produceState<Result<ByteArray>>(Result.Loading, resId) {
-                        value = withContext(Dispatchers.IO) {
-                            context.resources.openRawResource(resId)
-                                .use { Result.Success(it.readBytes()) }
-                        }
-                    }.value.andThen { bytes ->
-                        rememberImage(riveWorker, bytes)
-                    }
-                }.sequence()
-
-                var imageIndex by remember { mutableStateOf(0) }
 
 
 //                val lives by vmi.getNumberFlow("Energy_Bar/Lives")
@@ -195,8 +173,6 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
                                     println("ViewModel Props: $viewModelProperty")
                                 }
                         }
-
-                        HandleSimpleRiveAsset(context)
 
 
 //                        vmi.getBooleanFlow("isPressed")
@@ -243,7 +219,7 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
                     Rive(
                         file = riveFile,
                         viewModelInstance = vmi,
-                        fit = Fit.Contain(),
+                        fit = Fit.FitWidth(),
                         modifier = Modifier
 //                            .size(500.dp)
                             .weight(1f)
@@ -258,12 +234,7 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
                         onClick = {
                             vmi.fireTrigger("Press")
                             println("Button pressed $primary")
-                            if (imageAssets is Result.Success && imageAssets.value.isNotEmpty()) {
-                                val assets = imageAssets.value
 
-                                imageIndex = (imageIndex + 1) % assets.size
-                                vmi.setImage("Right Icon", assets[imageIndex])
-                            }
                             if (primary) {
                                 // ───────── PRIMARY STATE ─────────
                                 vmi.setString("Button Text", "Continue")
@@ -334,15 +305,6 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
         }
     }
 }
-
-open class HandleSimpleRiveAsset(context: Context) : ContextAssetLoader(context) {
-    override fun loadContents(asset: FileAsset, inBandBytes: ByteArray): Boolean {
-        context.resources.openRawResource(R.raw.button_v41).use {
-            return asset.decode(it.readBytes())
-        }
-    }
-}
-
 
 @Composable
 fun RiveBottomBarItem(
