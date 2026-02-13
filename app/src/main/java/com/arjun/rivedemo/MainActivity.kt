@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.RawRes
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -76,7 +77,7 @@ import app.rive.Result.Loading.sequence
 import app.rive.Result.Loading.zip
 import app.rive.runtime.kotlin.core.ContextAssetLoader
 import app.rive.runtime.kotlin.core.FileAsset
-
+import androidx.compose.foundation.layout.width
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -121,7 +122,7 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
     val riveWorker = rememberRiveWorker()
 
     val riveFileResult = rememberRiveFile(
-        RiveFileSource.RawRes.from(R.raw.button_v43),
+        RiveFileSource.RawRes.from(R.raw.button_v44),
         riveWorker
     )
 
@@ -216,19 +217,25 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Rive(
-                        file = riveFile,
-                        viewModelInstance = vmi,
-                        fit = Fit.FitWidth(),
-                        modifier = Modifier
-//                            .size(500.dp)
-                            .weight(1f)
-//                            .fillMaxWidth()
-                            .semantics {
-                            contentDescription = "Rive UI - Rewards Demo"
-                        },
-                        playing = true,
-                    )
+                    Box(
+//                        modifier = Modifier.padding(16.dp)
+                    ) {
+                        Rive(
+                            file = riveFile,
+                            viewModelInstance = vmi,
+                            fit = Fit.Contain(),
+                            modifier = Modifier
+                                .padding(16.dp)
+                                .background(Color.Red)
+//                                .width(200.dp)
+                                .size(500.dp)
+                                .semantics {
+                                    contentDescription = "Rive UI - Rewards Demo"
+                                },
+                            playing = true,
+                        )
+                    }
+
 
                     Button(
                         onClick = {
@@ -239,21 +246,18 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
                                 // ───────── PRIMARY STATE ─────────
                                 vmi.setString("Button Text", "Continue")
 
-                                vmi.setEnum("Show Left Icon", "Show")
-                                vmi.setEnum("Show Right Icon", "Show")
                                 vmi.setEnum("Show Lock Icon", "Hide")
-                                vmi.setColor("Bg Color", Color.Red.toArgb())
+                                vmi.setEnum("Right Cash", "Show")
+                                vmi.setEnum("Right Coin", "Hide")
                                 vmi.setNumber("Currency", 250f)
-                                vmi.setEnum("Right Icon", "IC_coin1")
 
                             } else {
                                 // ───────── DISABLED STATE ─────────
                                 vmi.setString("Button Text", "Locked")
 
-                                vmi.setEnum("Show Left Icon", "Hide")
-                                vmi.setEnum("Show Right Icon", "Show")
                                 vmi.setEnum("Show Lock Icon", "Show")
-                                vmi.setColor("Bg Color", Color(0xFFFFBF0F).toArgb())
+                                vmi.setEnum("Right Cash", "Hide")
+                                vmi.setEnum("Right Coin", "Show")
                                 vmi.setNumber("Currency", 250f)
 
                             }
