@@ -92,13 +92,20 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                     bottomBar = {
-                        RiveBottomBar(
-                            items = mainBottomItems,
-                            selectedItemId = selectedItem,
-                            onItemSelected = { item ->
-                                selectedItem = item.label
-                            }
-                        )
+                        Column (
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ){
+
+                            BottomRivePanel()
+
+                            RiveBottomBar(
+                                items = mainBottomItems,
+                                selectedItemId = selectedItem,
+                                onItemSelected = { item ->
+                                    selectedItem = item.label
+                                }
+                            )
+                        }
                     }
                 ) { padding ->
                     Greeting("Rive", modifier = Modifier.padding(padding))
@@ -187,44 +194,7 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
                 ) {
                     Text("Toggle Button State")
                 }
-
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-//                        .background(Color.Red)
-                        .padding(32.dp)
-                        .fillMaxWidth()
-                        .height(105.dp),
-                ) {
-                    Rive(
-                        file = riveFile,
-                        viewModelInstance = vmi,
-                        fit = Fit.Contain(),
-                        playing = true
-                    )
-                }
             }
-
-//                val lives by vmi.getNumberFlow("Energy_Bar/Lives")
-//                    .collectAsStateWithLifecycle(0f)
-//                val energy by vmi.getNumberFlow("Energy_Bar/Energy_Bar")
-//                    .collectAsStateWithLifecycle(0f)
-//                val coins by vmi.getNumberFlow("Coin/Item_Value")
-//                    .collectAsStateWithLifecycle(0f)
-//                val gems by vmi.getNumberFlow("Gem/Item_Value")
-//                    .collectAsStateWithLifecycle(0f)
-//                val winValue by vmi.getNumberFlow("Price_Value")
-//                    .collectAsStateWithLifecycle(0f)
-//                val winKind by vmi.getEnumFlow("Item_Selection/Item_Selection")
-//                    .map { WinKind.from(it) }
-//                    .collectAsStateWithLifecycle(WinKind.COIN)
-
-//                val main = rememberArtboard(
-//                    file = riveFile,
-//                    artboardName = "Main"
-//                )
-
 
                 LaunchedEffect(vmi) {
 
@@ -236,44 +206,46 @@ fun Greeting(name : String, modifier: Modifier = Modifier) {
                                     println("ViewModel Props: $viewModelProperty")
                                 }
                         }
-
-
-//                        vmi.getBooleanFlow("isPressed")
-//                            .collect {
-//                                println("is pressed $it")
-//                            }
-
                     }
 
-
-                    riveFile.getEnums().forEach {
-                        println("Enums: $it")
-                    }
-
-
-                    launch {
-                        riveFile.getArtboardNames()
-                            .forEach {
-                                println("Artboard names $it")
-                            }
-                    }
-//
-//                    launch {
-//                        vmi.getNumberFlow("Energy_Bar/Lives")
-//                            .collect { println("Lives: $it") }
-//                    }
-//
-//                    launch {
-//                        vmi.getNumberFlow("Energy_Bar/Energy_Bar")
-//                            .collect { println("Energy: $it") }
-//                    }
-//
-//                    launch {
-//                        vmi.getTriggerFlow("Button/Pressed")
-//                            .collect { println("Continue pressed") }
-//                    }
                 }
         }
+    }
+}
+
+
+@Composable
+fun BottomRivePanel() {
+
+    val riveWorker = rememberRiveWorker()
+
+    val riveFileResult = rememberRiveFile(
+        RiveFileSource.RawRes.from(R.raw.button_v46),
+        riveWorker
+    )
+
+    if (riveFileResult !is Result.Success) return
+
+    val riveFile = riveFileResult.value
+    val vmi = rememberViewModelInstance(riveFile)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .size(125.dp),
+//            .background(Color.Red),
+        contentAlignment = Alignment.Center
+    ) {
+
+        Rive(
+            modifier = Modifier
+                .align(Alignment.Center),
+//                .height(125.dp),
+            file = riveFile,
+            viewModelInstance = vmi,
+            fit = Fit.FitWidth(),
+            playing = true
+        )
     }
 }
 
@@ -339,7 +311,7 @@ fun RiveBottomBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .height(80.dp)
+//                .height(80.dp)
                 .padding(horizontal = 24.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
