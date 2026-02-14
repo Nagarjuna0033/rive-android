@@ -21,4 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "rivedemo"
 include(":app")
- 
+include(":benchmark")
