@@ -80,6 +80,7 @@ import app.rive.runtime.kotlin.core.ContextAssetLoader
 import app.rive.runtime.kotlin.core.FileAsset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.MutableState
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -92,20 +93,8 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                     bottomBar = {
-                        Column (
-                            verticalArrangement = Arrangement.spacedBy(16.dp)
-                        ){
 
-                            BottomRivePanel()
-
-                            RiveBottomBar(
-                                items = mainBottomItems,
-                                selectedItemId = selectedItem,
-                                onItemSelected = { item ->
-                                    selectedItem = item.label
-                                }
-                            )
-                        }
+                        BottomRivePanel()
                     }
                 ) { padding ->
                     Greeting("Rive", modifier = Modifier.padding(padding))
@@ -124,91 +113,47 @@ val mainBottomItems = listOf(
 @Composable
 fun Greeting(name : String, modifier: Modifier = Modifier) {
 
-    var showBottomPanel by remember { mutableStateOf(false) }
-    var triggered by remember { mutableStateOf(false) }
+    var primary by remember { mutableStateOf(false) }
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+            .background(Color.White)
+    ) {
 
-    var primary by remember { mutableStateOf(true) }
+        Button(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .navigationBarsPadding()
+                .padding(24.dp)
+                .fillMaxWidth(0.9f),
+            shape = RoundedCornerShape(16.dp),
+            onClick = {
+                println("Button pressed $primary")
+//                        if (primary) {
+//                            // ───────── PRIMARY STATE ─────────
+//                                vmi.setString("Button Text", "Continue")
+//
+//                                vmi.setEnum("Show Lock Icon", "Hide")
+//                                vmi.setEnum("Right Cash", "Show")
+//                                vmi.setEnum("Right Coin", "Hide")
+//                                vmi.setNumber("Currency", 250f)
+//
+//                        } else {
+//                            // ───────── DISABLED STATE ─────────
+//                                vmi.setString("Button Text", "Locked")
+//
+//                                vmi.setEnum("Show Lock Icon", "Show")
+//                                vmi.setEnum("Right Cash", "Hide")
+//                                vmi.setEnum("Right Coin", "Show")
+//                                vmi.setNumber("Currency", 250f)
+//
+//                        }
 
-    val riveWorker = rememberRiveWorker()
-
-    val riveFileResult = rememberRiveFile(
-        RiveFileSource.RawRes.from(R.raw.button_v46),
-        riveWorker
-    )
-
-    when (riveFileResult) {
-        is Result.Loading -> {
-            CircularProgressIndicator()
-            return
-        }
-
-        is Result.Error -> {
-            Text("Failed to load animation")
-            return
-        }
-
-        is Result.Success -> {
-
-            val riveFile = riveFileResult.value
-            val vmi = rememberViewModelInstance(riveFile)
-
-
-            Box(
-                modifier = modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding()
-                    .background(Color.White)
-            ) {
-
-                Button(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .navigationBarsPadding()
-                        .padding(24.dp)
-                        .fillMaxWidth(0.9f),
-                    shape = RoundedCornerShape(16.dp),
-                    onClick = {
-                        println("Button pressed $primary")
-                        if (primary) {
-                            // ───────── PRIMARY STATE ─────────
-                                vmi.setString("Button Text", "Continue")
-
-                                vmi.setEnum("Show Lock Icon", "Hide")
-                                vmi.setEnum("Right Cash", "Show")
-                                vmi.setEnum("Right Coin", "Hide")
-                                vmi.setNumber("Currency", 250f)
-
-                        } else {
-                            // ───────── DISABLED STATE ─────────
-                                vmi.setString("Button Text", "Locked")
-
-                                vmi.setEnum("Show Lock Icon", "Show")
-                                vmi.setEnum("Right Cash", "Hide")
-                                vmi.setEnum("Right Coin", "Show")
-                                vmi.setNumber("Currency", 250f)
-
-                        }
-
-                        primary = !primary
-                    },
-                ) {
-                    Text("Toggle Button State")
-                }
-            }
-
-                LaunchedEffect(vmi) {
-
-                    launch {
-                        riveFile.getViewModelNames().forEach {
-                            println("ViewModels: $it")
-                            riveFile.getViewModelProperties(it)
-                                .forEach { viewModelProperty ->
-                                    println("ViewModel Props: $viewModelProperty")
-                                }
-                        }
-                    }
-
-                }
+                primary = !primary
+            },
+        ) {
+            Text("Toggle Button State")
         }
     }
 }
@@ -232,19 +177,17 @@ fun BottomRivePanel() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(bottom = 32.dp)
             .size(125.dp),
-//            .background(Color.Red),
         contentAlignment = Alignment.Center
     ) {
 
         Rive(
             modifier = Modifier
                 .align(Alignment.Center),
-//                .height(125.dp),
             file = riveFile,
             viewModelInstance = vmi,
             fit = Fit.FitWidth(),
-            playing = true
         )
     }
 }
