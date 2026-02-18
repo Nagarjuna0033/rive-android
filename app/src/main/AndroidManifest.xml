@@ -32,7 +32,13 @@
             android:exported="true" />
 
         <activity
-            android:name=".RiveOnlyActivity"
+            android:name=".RiveRenderActivity"
+            android:exported="true" />
+
+        <activity android:name=".RiveClickActivity"
+            android:exported="true" />
+
+        <activity android:name=".RiveListActivity"
             android:exported="true" />
 
         <provider

@@ -4,21 +4,25 @@ import android.content.Intent
 import androidx.benchmark.macro.ExperimentalMetricApi
 import androidx.benchmark.macro.FrameTimingMetric
 import androidx.benchmark.macro.MemoryUsageMetric
+import androidx.benchmark.macro.StartupMode
+import androidx.benchmark.macro.StartupTimingMetric
 import androidx.benchmark.macro.junit4.MacrobenchmarkRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.uiautomator.By
+import androidx.test.uiautomator.Until
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
-class RiveBenchmark {
+class RiveClickBenchmark {
 
     @get:Rule
     val benchmarkRule = MacrobenchmarkRule()
 
     @OptIn(ExperimentalMetricApi::class)
     @Test
-    fun measureRive() = benchmarkRule.measureRepeated(
+    fun measureRiveClick() = benchmarkRule.measureRepeated(
         packageName = "com.arjun.rivedemo",
         metrics = listOf(
             FrameTimingMetric(),
@@ -28,22 +32,24 @@ class RiveBenchmark {
         setupBlock = {
             pressHome()
             startActivityAndWait(
-                Intent().apply {
-                    setClassName(
-                        "com.arjun.rivedemo",
-                        "com.arjun.rivedemo.RiveOnlyActivity"
-                    )
-                }
+                Intent().setClassName(
+                    "com.arjun.rivedemo",
+                    "com.arjun.rivedemo.RiveClickActivity"
+                )
             )
         }
     ) {
+
+        device.wait(Until.hasObject(By.desc("rive_box_1")), 5_000)
+
         repeat(10) {
-            device.click(
-                device.displayWidth / 2,
-                device.displayHeight / 2
-            )
-            Thread.sleep(500)
+            val box = device.findObject(By.desc("rive_box_1"))
+                ?: error("rive_box_1 not found")
+
+            box.click()
+            device.waitForIdle()
         }
+
     }
 
 }

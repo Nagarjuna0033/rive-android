@@ -1,7 +1,11 @@
 package com.arjun.rivedemo
 
+import android.app.ActivityManager
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.os.StatFs
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -79,8 +83,22 @@ import app.rive.Result.Loading.zip
 import app.rive.runtime.kotlin.core.ContextAssetLoader
 import app.rive.runtime.kotlin.core.FileAsset
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.MutableState
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import app.rive.RiveFile
+import app.rive.RiveLog
+import app.rive.core.RiveWorker
+import app.rive.rememberRegisteredFont
+import app.rive.rememberRiveWorkerOrNull
+import app.rive.runtime.kotlin.core.FontAsset
+import app.rive.runtime.kotlin.core.RiveFont
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -91,13 +109,38 @@ class MainActivity : ComponentActivity() {
             RivedemoTheme {
                 var selectedItem by remember { mutableStateOf("home") }
 
-                Scaffold(
-                    bottomBar = {
+                val itemsList = List(10) { it }
 
-                        BottomRivePanel()
-                    }
+                Scaffold(
+//                    bottomBar = {
+//                        BottomRivePanel()
+//                    }
                 ) { padding ->
-                    Greeting("Rive", modifier = Modifier.padding(padding))
+//                    Greeting("Rive", modifier = Modifier.padding(padding))
+                    val riveWorker = rememberRiveWorker()
+
+                    RiveAnimationTesting(
+                        modifier = Modifier.padding(padding),
+                        riveWorker = riveWorker,
+                        key = 1,
+                    )
+
+//                    LazyColumn(
+//                        modifier = Modifier.fillMaxSize().padding(padding),
+//                        verticalArrangement = Arrangement.spacedBy(25.dp)
+//                    ) {
+//                        items(
+//                            count = 10,
+//                            key = { it }
+//                        ) { item ->
+//                            RiveAnimationTesting(
+//                                modifier = Modifier,
+//                                key = item,
+//                                riveWorker = riveWorker
+//                            )
+//                        }
+//                    }
+//                    RiveWithOverlayText(modifier = Modifier.padding(padding), "Testing")
                 }
             }
         }
@@ -193,6 +236,83 @@ fun BottomRivePanel() {
 }
 
 
+@Composable
+fun RiveAnimationTesting(
+    modifier : Modifier = Modifier,
+    key: Int,
+    riveWorker: RiveWorker,
+) {
+
+    val context = LocalContext.current
+    RiveLog.logger = RiveLog.LogcatLogger()
+
+
+    val fontBytes by produceState<Result<ByteArray>>(Result.Loading) {
+        value = withContext(Dispatchers.IO) {
+            context.resources.openRawResource(R.raw.rajdhani_bold)
+                .use { Result.Success(it.readBytes()) }
+        }
+    }
+
+    val font = fontBytes.andThen { bytes ->
+        rememberRegisteredFont(riveWorker, "Outfit-4229794", bytes)
+    }
+
+
+    val riveFileResult = font.andThen {
+        rememberRiveFile(
+            RiveFileSource.RawRes.from(R.raw.testing_button_svg_without_font),
+            riveWorker
+        )
+    }
+
+    if (riveFileResult !is Result.Success) return
+    val vmi = rememberViewModelInstance(riveFileResult.value)
+
+    LaunchedEffect(Unit) {
+        vmi.setString("Button Text", "संपादित करें")
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(50.dp),
+        contentAlignment = Alignment.Center
+    ) {
+
+        Rive(
+            file = riveFileResult.value,
+            viewModelInstance = vmi,
+        )
+    }
+}
+
+
+
+@Composable
+fun RiveWithOverlayText(
+    modifier: Modifier = Modifier,
+    text: String
+) {
+    Box(
+        modifier = modifier.height(50.dp).width(95.dp),
+        contentAlignment = Alignment.Center
+    ) {
+
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(Color.Red),
+        )
+
+        Text(
+            text = text,
+            color = Color.Black,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
 
 
 @Composable
@@ -351,4 +471,25 @@ fun GreetingPreview() {
     RivedemoTheme {
         Greeting("Android")
     }
+}
+
+
+fun getDeviceSpecs(context: Context): Map<String, Any> {
+
+    val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+    val memoryInfo = ActivityManager.MemoryInfo()
+    activityManager.getMemoryInfo(memoryInfo)
+
+    val statFs = StatFs(Environment.getDataDirectory().path)
+
+    return mapOf(
+        "OS Version" to Build.VERSION.RELEASE,
+        "SDK" to Build.VERSION.SDK_INT,
+        "Manufacturer" to Build.MANUFACTURER,
+        "Model" to Build.MODEL,
+        "Total RAM (GB)" to memoryInfo.totalMem / (1024.0 * 1024 * 1024),
+        "Total Storage (GB)" to statFs.totalBytes / (1024.0 * 1024 * 1024),
+        "CPU Cores" to Runtime.getRuntime().availableProcessors(),
+        "Chipset" to if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else "Not Available"
+    )
 }
