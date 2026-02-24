@@ -28,9 +28,8 @@ import androidx.compose.ui.unit.dp
 import app.rive.Result
 import app.rive.Result.Loading.andThen
 import app.rive.Rive
+import app.rive.RiveFile
 import app.rive.RiveFileSource
-import app.rive.RiveLog
-import app.rive.core.RiveWorker
 import app.rive.rememberRegisteredFont
 import app.rive.rememberRiveFile
 import app.rive.rememberRiveWorker
@@ -54,7 +53,26 @@ class RiveListActivity : ComponentActivity() {
                     containerColor = Color.White
                 ) { padding ->
 
+                    val context = LocalContext.current
                     val riveWorker = rememberRiveWorker()
+
+                    val fontBytes by produceState<Result<ByteArray>>(Result.Loading) {
+                        value = withContext(Dispatchers.IO) {
+                            context.resources.openRawResource(R.raw.rajdhani_bold)
+                                .use { Result.Success(it.readBytes()) }
+                        }
+                    }
+
+                    val font = fontBytes.andThen { bytes ->
+                        rememberRegisteredFont(riveWorker, "Outfit-4229794", bytes)
+                    }
+
+                    val riveFileResult = font.andThen {
+                        rememberRiveFile(
+                            RiveFileSource.RawRes.from(R.raw.testing_button_svg_without_font),
+                            riveWorker
+                        )
+                    }
 
                     Column(
                         modifier = Modifier
@@ -69,15 +87,17 @@ class RiveListActivity : ComponentActivity() {
                                 .padding(16.dp)
                         )
 
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(15.dp)
-                        ) {
-                            items(10) { item ->
-                                BottomRivePanelTesting(
-                                    riveWorker = riveWorker,
-                                    index = item
-                                )
+                        if (riveFileResult is Result.Success) {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalArrangement = Arrangement.spacedBy(15.dp)
+                            ) {
+                                items(10) { item ->
+                                    BottomRivePanelTesting(
+                                        riveFile = riveFileResult.value,
+                                        index = item
+                                    )
+                                }
                             }
                         }
                     }
@@ -92,34 +112,10 @@ class RiveListActivity : ComponentActivity() {
 @Composable
 fun BottomRivePanelTesting(
     modifier: Modifier = Modifier,
-    riveWorker: RiveWorker,
+    riveFile: RiveFile,
     index: Int,
 ) {
-
-    val context = LocalContext.current
-    RiveLog.logger = RiveLog.LogcatLogger()
-
-
-    val fontBytes by produceState<Result<ByteArray>>(Result.Loading) {
-        value = withContext(Dispatchers.IO) {
-            context.resources.openRawResource(R.raw.rajdhani_bold)
-                .use { Result.Success(it.readBytes()) }
-        }
-    }
-
-    val font = fontBytes.andThen { bytes ->
-        rememberRegisteredFont(riveWorker, "Outfit-4229794", bytes)
-    }
-
-    val riveFileResult = font.andThen {
-        rememberRiveFile(
-            RiveFileSource.RawRes.from(R.raw.testing_button_svg_without_font),
-            riveWorker
-        )
-    }
-
-    if (riveFileResult !is Result.Success) return
-    val vmi = rememberViewModelInstance(riveFileResult.value)
+    val vmi = rememberViewModelInstance(riveFile)
 
     LaunchedEffect(Unit) {
         vmi.setString("Button Text", "Testing")
@@ -138,7 +134,7 @@ fun BottomRivePanelTesting(
         contentAlignment = Alignment.Center
     ) {
         Rive(
-            file = riveFileResult.value,
+            file = riveFile,
             viewModelInstance = vmi,
         )
     }
