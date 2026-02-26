@@ -31,15 +31,14 @@ class RiveListBenchmark {
         iterations = 5,
         setupBlock = {
             pressHome()
-            startActivityAndWait(
-                Intent().setClassName(
-                    "com.arjun.rivedemo",
-                    "com.arjun.rivedemo.RiveListActivity"
-                )
-            )
         }
     ) {
-
+        startActivityAndWait(
+            Intent().setClassName(
+                "com.arjun.rivedemo",
+                "com.arjun.rivedemo.RiveListActivity"
+            )
+        )
 
         repeat(10) { index ->
             val obj = device.wait(
