@@ -25,12 +25,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import app.rive.ImageAsset
 import app.rive.Result
 import app.rive.Result.Loading.andThen
+import app.rive.Result.Loading.zip
 import app.rive.Rive
 import app.rive.RiveFile
 import app.rive.RiveFileSource
+import app.rive.rememberImage
 import app.rive.rememberRegisteredFont
+import app.rive.rememberRegisteredImage
 import app.rive.rememberRiveFile
 import app.rive.rememberRiveWorker
 import app.rive.rememberViewModelInstance
@@ -67,12 +71,27 @@ class RiveListActivity : ComponentActivity() {
                         rememberRegisteredFont(riveWorker, "Outfit-4229794", bytes)
                     }
 
-                    val riveFileResult = font.andThen {
-                        rememberRiveFile(
-                            RiveFileSource.RawRes.from(R.raw.testing_button_svg_without_font),
-                            riveWorker
-                        )
+                    val imageBytes by produceState<Result<ByteArray>>(Result.Loading) {
+                        value = withContext(Dispatchers.IO) {
+                            context.resources.openRawResource(R.raw.ic_coin1)
+                                .use { Result.Success(it.readBytes()) }
+                        }
                     }
+
+                    val image = imageBytes.andThen { bytes ->
+                        println("bytes = [${bytes.size}]")
+                        rememberRegisteredImage(riveWorker, "1-5293216", bytes)
+                    }
+
+                    val riveFileResult = font.andThen {
+                        image.andThen {
+                            rememberRiveFile(
+                                RiveFileSource.RawRes.from(R.raw.testing_extracting_all),
+                                riveWorker
+                            )
+                        }
+                    }
+
 
                     Column(
                         modifier = Modifier
@@ -87,16 +106,20 @@ class RiveListActivity : ComponentActivity() {
                                 .padding(16.dp)
                         )
 
-                        if (riveFileResult is Result.Success) {
-                            LazyColumn(
-                                modifier = Modifier.fillMaxSize(),
-                                verticalArrangement = Arrangement.spacedBy(15.dp)
-                            ) {
-                                items(10) { item ->
-                                    BottomRivePanelTesting(
-                                        riveFile = riveFileResult.value,
-                                        index = item
-                                    )
+                        when (riveFileResult) {
+                            is Result.Loading -> {}
+                            is Result.Error -> {}
+                            is Result.Success -> {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    items(25) { item ->
+                                        BottomRivePanelTesting(
+                                            riveFile = riveFileResult.value,
+                                            index = item
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -117,8 +140,12 @@ fun BottomRivePanelTesting(
 ) {
     val vmi = rememberViewModelInstance(riveFile)
 
+
     LaunchedEffect(Unit) {
         vmi.setString("Button Text", "Testing")
+//        vmi.setEnum("Right Cash", "Show")
+//        vmi.setEnum("Right Coin", "Show")
+        vmi.setEnum("Show Lock Icon", "Show")
     }
 
     Box(

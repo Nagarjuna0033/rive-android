@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -52,37 +53,32 @@ class ComposeOnlyActivity : ComponentActivity() {
         setContent {
             var enabled by remember { mutableStateOf(true) }
 
-//            val infiniteTransition = rememberInfiniteTransition()
-
-//            val alpha by infiniteTransition.animateFloat(
-//                initialValue = 1f,
-//                targetValue = 0.99f,
-//                animationSpec = infiniteRepeatable(
-//                    animation = tween(1000),
-//                    repeatMode = RepeatMode.Reverse
-//                )
-//            )
-
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(Color.White),
                 contentAlignment = Alignment.Center
             ) {
-                DemoPrimaryButton(
-                    modifier = Modifier
-                        .height(50.dp)
-                        .width(220.dp)
-//                        .graphicsLayer(alpha = alpha)
-                        .semantics {
-                            contentDescription = "benchmark_button"
-                        },
-                    primaryText = "Demo",
-                    isEnabled = enabled,
-                    onClick = {
-                        enabled = !enabled
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(25) {
+                        DemoPrimaryButton(
+                            modifier = Modifier
+                                .height(50.dp)
+                                .width(220.dp)
+                                .semantics {
+                                    contentDescription = "benchmark_button_${it}"
+                                },
+                            primaryText = "Demo",
+                            isEnabled = enabled,
+                            onClick = {
+                                enabled = !enabled
+                            }
+                        )
                     }
-                )
+                }
+
             }
         }
     }
