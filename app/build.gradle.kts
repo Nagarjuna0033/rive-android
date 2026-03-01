@@ -62,6 +62,11 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 
-    implementation("app.rive:rive-android:11.1.1")
+    // Local Rive SDK with batched drawing support
+    implementation(files("libs/rive-android-local.aar"))
+    // Transitive dependencies of the local .aar (not auto-resolved)
     implementation("androidx.startup:startup-runtime:1.2.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
+    implementation("com.android.volley:volley:1.2.1")
+    implementation("com.getkeepsafe.relinker:relinker:1.4.5")
 }

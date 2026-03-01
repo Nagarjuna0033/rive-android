@@ -41,6 +41,9 @@
         <activity android:name=".RiveListActivity"
             android:exported="true" />
 
+        <activity android:name=".RiveBatchListActivity"
+            android:exported="true" />
+
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
