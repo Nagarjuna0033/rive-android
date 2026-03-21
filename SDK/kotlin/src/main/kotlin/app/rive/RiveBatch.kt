@@ -240,7 +240,13 @@ fun RiveBatchSurface(
     Layout(
         modifier = positionTrackingModifier,
         content = {
-            // Single TextureView for all batch items.
+            // Provide the coordinator to children and render content FIRST (behind).
+            CompositionLocalProvider(LocalRiveBatchCoordinator provides coordinator) {
+                content()
+            }
+
+            // Single TextureView SECOND (on top as transparent overlay).
+            // isOpaque = false means only Rive items are visible; rest is transparent.
             AndroidView(factory = { context: Context ->
                 TextureView(context).apply {
                     isOpaque = false
@@ -282,11 +288,6 @@ fun RiveBatchSurface(
                     }
                 }
             })
-
-            // Provide the coordinator to children and render content.
-            CompositionLocalProvider(LocalRiveBatchCoordinator provides coordinator) {
-                content()
-            }
         }
     ) { measurables, constraints ->
         val placeables = measurables.map { it.measure(constraints) }
