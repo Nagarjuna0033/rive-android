@@ -23,6 +23,7 @@ import androidx.compose.ui.input.pointer.PointerInputFilter
 import androidx.compose.ui.input.pointer.PointerInputModifier
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
@@ -396,10 +397,9 @@ fun RiveBatchItem(
         }
     }
 
-    // Register/update position on every layout pass (including scroll).
-    val combinedModifier = modifier
-        .onGloballyPositioned { coords ->
-            if (!coords.isAttached) return@onGloballyPositioned
+    // Helper to update position in the coordinator from layout coordinates.
+    val updatePosition = { coords: androidx.compose.ui.layout.LayoutCoordinates ->
+        if (coords.isAttached) {
             val rootPos = coords.positionInRoot()
             val size = coords.size
             val relativeX = (rootPos.x - coordinator.surfaceRootX).toInt()
@@ -418,6 +418,14 @@ fun RiveBatchItem(
                 )
             )
         }
+    }
+
+    // Register/update position on layout AND placement (scroll).
+    // onGloballyPositioned fires on layout changes.
+    // onPlaced fires on every placement including scroll offsets.
+    val combinedModifier = modifier
+        .onGloballyPositioned(updatePosition)
+        .onPlaced(updatePosition)
         .then(pointerInputModifier)
 
     Layout(
