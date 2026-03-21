@@ -3,7 +3,6 @@ package app.rive
 import android.content.Context
 import android.graphics.SurfaceTexture
 import android.view.TextureView
-import android.view.ViewTreeObserver
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -14,8 +13,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.Layout
@@ -32,10 +35,8 @@ import app.rive.core.RiveSurface
 import app.rive.core.RiveWorker
 import app.rive.core.StateMachineHandle
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.suspendCancellableCoroutine
 import androidx.compose.runtime.withFrameNanos
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.coroutines.resume
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.nanoseconds
 
@@ -103,6 +104,28 @@ class RiveBatchCoordinator {
     /** Unregister an item (e.g. when it leaves composition). */
     internal fun unregister(key: Any) {
         items.remove(key)
+    }
+
+    /**
+     * Apply a scroll delta to all registered items immediately.
+     * Called from [NestedScrollConnection.onPreScroll] which fires BEFORE
+     * [withFrameNanos], so positions are pre-corrected before the render loop reads them.
+     * [onPlaced] overwrites with official positions after layout, keeping things in sync.
+     */
+    internal fun applyScrollDelta(dx: Float, dy: Float) {
+        val dxInt = dx.toInt()
+        val dyInt = dy.toInt()
+        if (dxInt == 0 && dyInt == 0) return
+
+        for (entry in items.entries) {
+            val item = entry.value
+            entry.setValue(
+                item.copy(
+                    x = item.x - dxInt,
+                    y = item.y - dyInt,
+                )
+            )
+        }
     }
 
     /** Round up to next power of 2 (minimum 4). */
@@ -177,6 +200,9 @@ val LocalRiveBatchCoordinator = compositionLocalOf<RiveBatchCoordinator?> { null
  * Wraps a single [TextureView] and renders all registered items each frame using
  * [CommandQueue.drawBatch], reducing per-frame GPU context switches from N to 1.
  *
+ * Uses a [NestedScrollConnection] to intercept scroll deltas before the render loop,
+ * pre-correcting item positions so they are accurate when [fillBatchArrays] reads them.
+ *
  * @param riveWorker The Rive command queue / worker to use for rendering.
  * @param modifier Modifier applied to the surface layout.
  * @param surfaceClearColor Color to clear the entire surface with before drawing items.
@@ -193,7 +219,6 @@ fun RiveBatchSurface(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var surface by remember { mutableStateOf<RiveSurface?>(null) }
-    var batchTextureView by remember { mutableStateOf<TextureView?>(null) }
 
     // Cleanup: destroy the RiveSurface when it changes or on dispose.
     DisposableEffect(surface) {
@@ -203,26 +228,27 @@ fun RiveBatchSurface(
         }
     }
 
-    // Render loop: uses OnPreDrawListener to read positions AFTER layout phase,
-    // eliminating the 1-frame position lag that occurs with withFrameNanos alone.
-    //
-    // Frame lifecycle:
-    //   1. Animation phase (withFrameNanos) — compute deltaTime
-    //   2. Composition
-    //   3. Layout phase (onPlaced) — positions updated here
-    //   4. Pre-draw (OnPreDrawListener) — fillBatchArrays + drawBatch here
-    //   5. Drawing
-    //
-    // By drawing in step 4, positions are current-frame accurate.
-    LaunchedEffect(lifecycleOwner, surface, batchTextureView) {
+    // Intercept scroll deltas BEFORE they are consumed by the LazyColumn.
+    // onPreScroll fires during input processing, which happens BEFORE withFrameNanos.
+    // This pre-corrects item positions so the render loop reads accurate coordinates.
+    // After layout, onPlaced overwrites with official positions (self-correcting).
+    val nestedScrollConnection = remember(coordinator) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                coordinator.applyScrollDelta(available.x, available.y)
+                return Offset.Zero // don't consume — let the scrollable handle it
+            }
+        }
+    }
+
+    // Render loop: advances state machines and draws all items each frame.
+    LaunchedEffect(lifecycleOwner, surface) {
         val currentSurface = surface ?: return@LaunchedEffect
-        val tv = batchTextureView ?: return@LaunchedEffect
         RiveLog.d(BATCH_DRAW_TAG) { "Starting batched render loop" }
 
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             var lastFrameTime = Duration.ZERO
             while (isActive) {
-                // Step 1: Sync with frame timing and compute deltaTime.
                 val deltaTime = withFrameNanos { frameTimeNs ->
                     val frameTime = frameTimeNs.nanoseconds
                     val dt = if (lastFrameTime == Duration.ZERO) {
@@ -234,60 +260,45 @@ fun RiveBatchSurface(
                     dt
                 }
 
-                // Step 4: Wait for pre-draw (after layout has updated positions).
-                suspendCancellableCoroutine { cont ->
-                    val listener = object : ViewTreeObserver.OnPreDrawListener {
-                        override fun onPreDraw(): Boolean {
-                            tv.viewTreeObserver.removeOnPreDrawListener(this)
+                val count = coordinator.fillBatchArrays()
+                if (count == 0) continue
 
-                            val count = coordinator.fillBatchArrays()
-                            if (count > 0) {
-                                for (j in 0 until count) {
-                                    val smRef = coordinator.smHandleRefs[j] ?: continue
-                                    riveWorker.advanceStateMachine(smRef, deltaTime)
-                                }
+                // Advance all state machines.
+                for (j in 0 until count) {
+                    val smRef = coordinator.smHandleRefs[j] ?: continue
+                    riveWorker.advanceStateMachine(smRef, deltaTime)
+                }
 
-                                try {
-                                    riveWorker.drawBatch(
-                                        currentSurface,
-                                        coordinator.artboardHandles,
-                                        coordinator.smHandles,
-                                        coordinator.viewportXs,
-                                        coordinator.viewportYs,
-                                        coordinator.viewportWidths,
-                                        coordinator.viewportHeights,
-                                        coordinator.fits,
-                                        coordinator.alignments,
-                                        coordinator.scaleFactors,
-                                        coordinator.clearColors,
-                                        surfaceClearColor,
-                                    )
-                                } catch (e: Exception) {
-                                    RiveLog.e(BATCH_DRAW_TAG) { "drawBatch failed: ${e.message}" }
-                                }
-                            }
-
-                            cont.resume(Unit)
-                            return true
-                        }
-                    }
-
-                    tv.viewTreeObserver.addOnPreDrawListener(listener)
-
-                    cont.invokeOnCancellation {
-                        tv.viewTreeObserver.removeOnPreDrawListener(listener)
-                    }
+                try {
+                    riveWorker.drawBatch(
+                        currentSurface,
+                        coordinator.artboardHandles,
+                        coordinator.smHandles,
+                        coordinator.viewportXs,
+                        coordinator.viewportYs,
+                        coordinator.viewportWidths,
+                        coordinator.viewportHeights,
+                        coordinator.fits,
+                        coordinator.alignments,
+                        coordinator.scaleFactors,
+                        coordinator.clearColors,
+                        surfaceClearColor,
+                    )
+                } catch (e: Exception) {
+                    RiveLog.e(BATCH_DRAW_TAG) { "drawBatch failed: ${e.message}" }
                 }
             }
         }
     }
 
     // Track the surface's root position so items can compute relative offsets.
-    val positionTrackingModifier = modifier.onGloballyPositioned { coords ->
-        val pos = coords.positionInRoot()
-        coordinator.surfaceRootX = pos.x
-        coordinator.surfaceRootY = pos.y
-    }
+    val positionTrackingModifier = modifier
+        .nestedScroll(nestedScrollConnection)
+        .onGloballyPositioned { coords ->
+            val pos = coords.positionInRoot()
+            coordinator.surfaceRootX = pos.x
+            coordinator.surfaceRootY = pos.y
+        }
 
     Layout(
         modifier = positionTrackingModifier,
@@ -301,7 +312,6 @@ fun RiveBatchSurface(
             // isOpaque = false means only Rive items are visible; rest is transparent.
             AndroidView(factory = { context: Context ->
                 TextureView(context).apply {
-                    batchTextureView = this
                     isOpaque = false
                     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                         override fun onSurfaceTextureAvailable(
