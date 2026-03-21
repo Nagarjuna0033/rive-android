@@ -3,6 +3,7 @@ package app.rive
 import android.content.Context
 import android.graphics.SurfaceTexture
 import android.view.TextureView
+import android.view.ViewTreeObserver
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -31,8 +32,10 @@ import app.rive.core.RiveSurface
 import app.rive.core.RiveWorker
 import app.rive.core.StateMachineHandle
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import androidx.compose.runtime.withFrameNanos
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.nanoseconds
 
@@ -54,9 +57,6 @@ data class BatchItemDescriptor(
     val height: Int,
     val fit: Fit,
     val backgroundColor: Int,
-    // Previous position for velocity compensation (1-frame lag correction).
-    val prevX: Int = x,
-    val prevY: Int = y,
 )
 
 /**
@@ -95,14 +95,9 @@ class RiveBatchCoordinator {
     // Snapshot array for iteration — avoids ConcurrentHashMap iterator allocation per frame.
     private var snapshot = arrayOfNulls<Map.Entry<Any, BatchItemDescriptor>>(0)
 
-    /** Register an item for batched rendering. Carries over previous position for velocity tracking. */
+    /** Register an item for batched rendering. */
     internal fun register(key: Any, descriptor: BatchItemDescriptor) {
-        val prev = items[key]
-        items[key] = if (prev != null) {
-            descriptor.copy(prevX = prev.x, prevY = prev.y)
-        } else {
-            descriptor
-        }
+        items[key] = descriptor
     }
 
     /** Unregister an item (e.g. when it leaves composition). */
@@ -148,19 +143,14 @@ class RiveBatchCoordinator {
             snapshot = arrayOfNulls(capacity)
         }
 
-        // Snapshot entries and apply velocity compensation.
-        // Because fillBatchArrays() runs during the animation phase (withFrameNanos)
-        // but onPlaced updates positions during the layout phase (one phase later),
-        // positions are always 1 frame stale. We extrapolate by adding the velocity
-        // (current - previous) to predict where each item will be this frame.
         var i = 0
         for (entry in items.entries) {
             if (i >= capacity) break
             val item = entry.value
             artboardHandles[i] = item.artboardHandle.handle
             smHandles[i] = item.stateMachineHandle.handle
-            viewportXs[i] = item.x + (item.x - item.prevX)
-            viewportYs[i] = item.y + (item.y - item.prevY)
+            viewportXs[i] = item.x
+            viewportYs[i] = item.y
             viewportWidths[i] = item.width
             viewportHeights[i] = item.height
             fits[i] = item.fit.nativeMapping
@@ -203,6 +193,8 @@ fun RiveBatchSurface(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var surface by remember { mutableStateOf<RiveSurface?>(null) }
+    var batchTextureView by remember { mutableStateOf<TextureView?>(null) }
+
     // Cleanup: destroy the RiveSurface when it changes or on dispose.
     DisposableEffect(surface) {
         val nonNullSurface = surface ?: return@DisposableEffect onDispose { }
@@ -211,14 +203,26 @@ fun RiveBatchSurface(
         }
     }
 
-    // Render loop: advances state machines and draws all items each frame.
-    LaunchedEffect(lifecycleOwner, surface) {
+    // Render loop: uses OnPreDrawListener to read positions AFTER layout phase,
+    // eliminating the 1-frame position lag that occurs with withFrameNanos alone.
+    //
+    // Frame lifecycle:
+    //   1. Animation phase (withFrameNanos) — compute deltaTime
+    //   2. Composition
+    //   3. Layout phase (onPlaced) — positions updated here
+    //   4. Pre-draw (OnPreDrawListener) — fillBatchArrays + drawBatch here
+    //   5. Drawing
+    //
+    // By drawing in step 4, positions are current-frame accurate.
+    LaunchedEffect(lifecycleOwner, surface, batchTextureView) {
         val currentSurface = surface ?: return@LaunchedEffect
+        val tv = batchTextureView ?: return@LaunchedEffect
         RiveLog.d(BATCH_DRAW_TAG) { "Starting batched render loop" }
 
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             var lastFrameTime = Duration.ZERO
             while (isActive) {
+                // Step 1: Sync with frame timing and compute deltaTime.
                 val deltaTime = withFrameNanos { frameTimeNs ->
                     val frameTime = frameTimeNs.nanoseconds
                     val dt = if (lastFrameTime == Duration.ZERO) {
@@ -230,32 +234,49 @@ fun RiveBatchSurface(
                     dt
                 }
 
-                val count = coordinator.fillBatchArrays()
-                if (count == 0) continue
+                // Step 4: Wait for pre-draw (after layout has updated positions).
+                suspendCancellableCoroutine { cont ->
+                    val listener = object : ViewTreeObserver.OnPreDrawListener {
+                        override fun onPreDraw(): Boolean {
+                            tv.viewTreeObserver.removeOnPreDrawListener(this)
 
-                // Advance all state machines.
-                for (j in 0 until count) {
-                    val smRef = coordinator.smHandleRefs[j] ?: continue
-                    riveWorker.advanceStateMachine(smRef, deltaTime)
-                }
+                            val count = coordinator.fillBatchArrays()
+                            if (count > 0) {
+                                for (j in 0 until count) {
+                                    val smRef = coordinator.smHandleRefs[j] ?: continue
+                                    riveWorker.advanceStateMachine(smRef, deltaTime)
+                                }
 
-                try {
-                    riveWorker.drawBatch(
-                        currentSurface,
-                        coordinator.artboardHandles,
-                        coordinator.smHandles,
-                        coordinator.viewportXs,
-                        coordinator.viewportYs,
-                        coordinator.viewportWidths,
-                        coordinator.viewportHeights,
-                        coordinator.fits,
-                        coordinator.alignments,
-                        coordinator.scaleFactors,
-                        coordinator.clearColors,
-                        surfaceClearColor,
-                    )
-                } catch (e: Exception) {
-                    RiveLog.e(BATCH_DRAW_TAG) { "drawBatch failed: ${e.message}" }
+                                try {
+                                    riveWorker.drawBatch(
+                                        currentSurface,
+                                        coordinator.artboardHandles,
+                                        coordinator.smHandles,
+                                        coordinator.viewportXs,
+                                        coordinator.viewportYs,
+                                        coordinator.viewportWidths,
+                                        coordinator.viewportHeights,
+                                        coordinator.fits,
+                                        coordinator.alignments,
+                                        coordinator.scaleFactors,
+                                        coordinator.clearColors,
+                                        surfaceClearColor,
+                                    )
+                                } catch (e: Exception) {
+                                    RiveLog.e(BATCH_DRAW_TAG) { "drawBatch failed: ${e.message}" }
+                                }
+                            }
+
+                            cont.resume(Unit)
+                            return true
+                        }
+                    }
+
+                    tv.viewTreeObserver.addOnPreDrawListener(listener)
+
+                    cont.invokeOnCancellation {
+                        tv.viewTreeObserver.removeOnPreDrawListener(listener)
+                    }
                 }
             }
         }
@@ -280,6 +301,7 @@ fun RiveBatchSurface(
             // isOpaque = false means only Rive items are visible; rest is transparent.
             AndroidView(factory = { context: Context ->
                 TextureView(context).apply {
+                    batchTextureView = this
                     isOpaque = false
                     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
                         override fun onSurfaceTextureAvailable(
