@@ -121,8 +121,8 @@ class RiveBatchCoordinator {
             val item = entry.value
             entry.setValue(
                 item.copy(
-                    x = item.x - dxInt,
-                    y = item.y - dyInt,
+                    x = item.x + dxInt,
+                    y = item.y + dyInt,
                 )
             )
         }
