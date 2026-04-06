@@ -88,18 +88,34 @@ class RiveBatchCoordinator {
     internal var clearColors = IntArray(0); private set
     // StateMachineHandle references for advancing (not passed to JNI).
     internal var smHandleRefs = arrayOfNulls<StateMachineHandle>(0); private set
+    // Keys for each item — used to check first-frame status.
+    internal var itemKeys = arrayOfNulls<Any>(0); private set
 
     // Snapshot array for iteration — avoids ConcurrentHashMap iterator allocation per frame.
     private var snapshot = arrayOfNulls<Map.Entry<Any, BatchItemDescriptor>>(0)
 
+    // Track newly registered items that haven't been rendered yet.
+    // On their first frame, advance with Duration.ZERO so auto-play
+    // animations start from the beginning.
+    private val newItems = ConcurrentHashMap.newKeySet<Any>()
+
     /** Register an item for batched rendering. */
     internal fun register(key: Any, descriptor: BatchItemDescriptor) {
+        if (!items.containsKey(key)) {
+            newItems.add(key)
+        }
         items[key] = descriptor
     }
 
     /** Unregister an item (e.g. when it leaves composition). */
     internal fun unregister(key: Any) {
         items.remove(key)
+        newItems.remove(key)
+    }
+
+    /** Check if an item is on its first frame, and clear the flag. */
+    internal fun consumeFirstFrame(key: Any): Boolean {
+        return newItems.remove(key)
     }
 
     /** Round up to next power of 2 (minimum 4). */
@@ -137,6 +153,7 @@ class RiveBatchCoordinator {
             scaleFactors = FloatArray(capacity)
             clearColors = IntArray(capacity)
             smHandleRefs = arrayOfNulls(capacity)
+            itemKeys = arrayOfNulls(capacity)
             snapshot = arrayOfNulls(capacity)
         }
 
@@ -155,6 +172,7 @@ class RiveBatchCoordinator {
             scaleFactors[i] = item.fit.scaleFactor
             clearColors[i] = item.backgroundColor
             smHandleRefs[i] = item.stateMachineHandle
+            itemKeys[i] = entry.key
             i++
         }
 
@@ -225,9 +243,13 @@ fun RiveBatchSurface(
                 if (count == 0) continue
 
                 // Advance all state machines.
+                // On the first frame after registration, advance with zero delta so
+                // auto-play animations start from the beginning.
                 for (j in 0 until count) {
                     val smRef = coordinator.smHandleRefs[j] ?: continue
-                    riveWorker.advanceStateMachine(smRef, deltaTime)
+                    val key = coordinator.itemKeys[j] ?: continue
+                    val effectiveDelta = if (coordinator.consumeFirstFrame(key)) Duration.ZERO else deltaTime
+                    riveWorker.advanceStateMachine(smRef, effectiveDelta)
                 }
 
                 try {
