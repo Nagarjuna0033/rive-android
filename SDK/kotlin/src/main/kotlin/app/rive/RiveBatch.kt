@@ -227,6 +227,12 @@ fun RiveBatchSurface(
 
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             var lastFrameTime = Duration.ZERO
+            var wasDrawing = false
+            // Zero-length arrays for the clear call when all items leave.
+            val emptyLongs = LongArray(0)
+            val emptyInts = IntArray(0)
+            val emptyBytes = ByteArray(0)
+            val emptyFloats = FloatArray(0)
             while (isActive) {
                 val deltaTime = withFrameNanos { frameTimeNs ->
                     val frameTime = frameTimeNs.nanoseconds
@@ -240,7 +246,24 @@ fun RiveBatchSurface(
                 }
 
                 val count = coordinator.fillBatchArrays()
-                if (count == 0) continue
+                if (count == 0) {
+                    // Clear the surface once when all items leave composition
+                    // so stale frames don't persist (e.g. nav bar on other screens).
+                    if (wasDrawing) {
+                        try {
+                            riveWorker.drawBatch(
+                                currentSurface,
+                                emptyLongs, emptyLongs,
+                                emptyInts, emptyInts, emptyInts, emptyInts,
+                                emptyBytes, emptyBytes, emptyFloats, emptyInts,
+                                surfaceClearColor,
+                            )
+                        } catch (_: Exception) { }
+                        wasDrawing = false
+                    }
+                    continue
+                }
+                wasDrawing = true
 
                 // Advance all state machines.
                 // On the first frame after registration, advance with zero delta so
