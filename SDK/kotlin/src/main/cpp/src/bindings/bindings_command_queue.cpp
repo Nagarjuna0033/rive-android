@@ -2308,10 +2308,12 @@ extern "C"
         auto surfaceClearColor = static_cast<uint32_t>(jSurfaceClearColor);
 
         jint count = env->GetArrayLength(jArtboardHandles);
+        if (count == 0)
+        {
+            return;
+        }
 
         // Copy all array data from JNI before entering the draw lambda.
-        // When count == 0, vectors are empty and the draw loop is skipped,
-        // but we still beginFrame/flush/present to clear the surface.
         std::vector<jlong> artboardHandles(count);
         std::vector<jlong> smHandles(count);
         std::vector<jint> viewportXs(count);
@@ -2323,24 +2325,21 @@ extern "C"
         std::vector<jfloat> scaleFactors(count);
         std::vector<jint> clearColors(count);
 
-        if (count > 0)
-        {
-            env->GetLongArrayRegion(jArtboardHandles, 0, count,
-                                    artboardHandles.data());
-            env->GetLongArrayRegion(jStateMachineHandles, 0, count,
-                                    smHandles.data());
-            env->GetIntArrayRegion(jViewportXs, 0, count, viewportXs.data());
-            env->GetIntArrayRegion(jViewportYs, 0, count, viewportYs.data());
-            env->GetIntArrayRegion(jViewportWidths, 0, count,
-                                   viewportWidths.data());
-            env->GetIntArrayRegion(jViewportHeights, 0, count,
-                                   viewportHeights.data());
-            env->GetByteArrayRegion(jFits, 0, count, fits.data());
-            env->GetByteArrayRegion(jAlignments, 0, count, alignments.data());
-            env->GetFloatArrayRegion(jScaleFactors, 0, count,
-                                     scaleFactors.data());
-            env->GetIntArrayRegion(jClearColors, 0, count, clearColors.data());
-        }
+        env->GetLongArrayRegion(jArtboardHandles, 0, count,
+                                artboardHandles.data());
+        env->GetLongArrayRegion(jStateMachineHandles, 0, count,
+                                smHandles.data());
+        env->GetIntArrayRegion(jViewportXs, 0, count, viewportXs.data());
+        env->GetIntArrayRegion(jViewportYs, 0, count, viewportYs.data());
+        env->GetIntArrayRegion(jViewportWidths, 0, count,
+                               viewportWidths.data());
+        env->GetIntArrayRegion(jViewportHeights, 0, count,
+                               viewportHeights.data());
+        env->GetByteArrayRegion(jFits, 0, count, fits.data());
+        env->GetByteArrayRegion(jAlignments, 0, count, alignments.data());
+        env->GetFloatArrayRegion(jScaleFactors, 0, count,
+                                 scaleFactors.data());
+        env->GetIntArrayRegion(jClearColors, 0, count, clearColors.data());
 
         auto drawWork = [commandQueue,
                          renderContext,
