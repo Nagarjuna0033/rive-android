@@ -2287,6 +2287,7 @@ extern "C"
         jlong renderTargetRef,
         jint surfaceWidth,
         jint surfaceHeight,
+        jint jCount,
         jlongArray jArtboardHandles,
         jlongArray jStateMachineHandles,
         jintArray jViewportXs,
@@ -2307,7 +2308,10 @@ extern "C"
             reinterpret_cast<rive::gpu::RenderTargetGL*>(renderTargetRef);
         auto surfaceClearColor = static_cast<uint32_t>(jSurfaceClearColor);
 
-        jint count = env->GetArrayLength(jArtboardHandles);
+        // Use the explicit count from Kotlin rather than GetArrayLength,
+        // because batch arrays are power-of-2 capacity-sized and may
+        // contain stale data beyond the actual item count.
+        jint count = jCount;
 
         // Copy array data from JNI before entering the draw lambda.
         std::vector<jlong> artboardHandles(count);

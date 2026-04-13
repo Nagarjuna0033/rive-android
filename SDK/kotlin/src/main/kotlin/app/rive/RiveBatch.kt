@@ -3,12 +3,14 @@ package app.rive
 import android.content.Context
 import android.graphics.SurfaceTexture
 import android.view.TextureView
+import android.view.View
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -66,6 +68,10 @@ data class BatchItemDescriptor(
 class RiveBatchCoordinator {
     private val items = ConcurrentHashMap<Any, BatchItemDescriptor>()
 
+    /** Observable item count — drives TextureView auto-hide in [RiveBatchSurface]. */
+    var itemCount by mutableIntStateOf(0)
+        private set
+
     /** The root X position of the batch surface in the composition's root coordinates. */
     var surfaceRootX: Float = 0f
         internal set
@@ -95,11 +101,13 @@ class RiveBatchCoordinator {
     /** Register an item for batched rendering. */
     internal fun register(key: Any, descriptor: BatchItemDescriptor) {
         items[key] = descriptor
+        itemCount = items.size
     }
 
     /** Unregister an item (e.g. when it leaves composition). */
     internal fun unregister(key: Any) {
         items.remove(key)
+        itemCount = items.size
     }
 
     /** Round up to next power of 2 (minimum 4). */
@@ -122,8 +130,8 @@ class RiveBatchCoordinator {
     internal fun fillBatchArrays(): Int {
         val count = items.size
         if (count == 0) {
-            // Reset to zero-length arrays so JNI GetArrayLength returns 0,
-            // not the previous capacity with stale freed handles.
+            // Reset to zero-length arrays to release memory when all items
+            // have unregistered. The explicit count param prevents stale reads.
             if (capacity > 0) {
                 capacity = 0
                 artboardHandles = LongArray(0)
@@ -255,6 +263,7 @@ fun RiveBatchSurface(
                 try {
                     riveWorker.drawBatch(
                         currentSurface,
+                        count,
                         coordinator.artboardHandles,
                         coordinator.smHandles,
                         coordinator.viewportXs,
@@ -292,43 +301,51 @@ fun RiveBatchSurface(
 
             // Single TextureView SECOND (on top as transparent overlay).
             // isOpaque = false means only Rive items are visible; rest is transparent.
-            AndroidView(factory = { context: Context ->
-                TextureView(context).apply {
-                    isOpaque = false
-                    surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                        override fun onSurfaceTextureAvailable(
-                            newSurfaceTexture: SurfaceTexture,
-                            width: Int,
-                            height: Int
-                        ) {
-                            RiveLog.d(BATCH_TAG) {
-                                "Batch surface texture available ($width x $height)"
+            // Auto-hide when no items are registered to prevent stale frame persistence
+            // in the TextureView buffer pipeline during tab transitions.
+            val hasItems = coordinator.itemCount > 0
+            AndroidView(
+                factory = { context: Context ->
+                    TextureView(context).apply {
+                        isOpaque = false
+                        surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                            override fun onSurfaceTextureAvailable(
+                                newSurfaceTexture: SurfaceTexture,
+                                width: Int,
+                                height: Int
+                            ) {
+                                RiveLog.d(BATCH_TAG) {
+                                    "Batch surface texture available ($width x $height)"
+                                }
+                                surface = riveWorker.createRiveSurface(newSurfaceTexture)
                             }
-                            surface = riveWorker.createRiveSurface(newSurfaceTexture)
-                        }
 
-                        override fun onSurfaceTextureDestroyed(
-                            destroyedSurfaceTexture: SurfaceTexture
-                        ): Boolean {
-                            RiveLog.d(BATCH_TAG) { "Batch surface texture destroyed" }
-                            surface = null
-                            return false
-                        }
-
-                        override fun onSurfaceTextureSizeChanged(
-                            surfaceTexture: SurfaceTexture,
-                            width: Int,
-                            height: Int
-                        ) {
-                            RiveLog.d(BATCH_TAG) {
-                                "Batch surface texture size changed ($width x $height)"
+                            override fun onSurfaceTextureDestroyed(
+                                destroyedSurfaceTexture: SurfaceTexture
+                            ): Boolean {
+                                RiveLog.d(BATCH_TAG) { "Batch surface texture destroyed" }
+                                surface = null
+                                return false
                             }
-                        }
 
-                        override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) {}
+                            override fun onSurfaceTextureSizeChanged(
+                                surfaceTexture: SurfaceTexture,
+                                width: Int,
+                                height: Int
+                            ) {
+                                RiveLog.d(BATCH_TAG) {
+                                    "Batch surface texture size changed ($width x $height)"
+                                }
+                            }
+
+                            override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) {}
+                        }
                     }
-                }
-            })
+                },
+                update = { textureView ->
+                    textureView.visibility = if (hasItems) View.VISIBLE else View.INVISIBLE
+                },
+            )
         }
     ) { measurables, constraints ->
         val placeables = measurables.map { it.measure(constraints) }

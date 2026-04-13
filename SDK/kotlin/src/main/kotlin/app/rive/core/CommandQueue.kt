@@ -2174,6 +2174,7 @@ class CommandQueue(
     @Throws(IllegalStateException::class)
     fun drawBatch(
         surface: RiveSurface,
+        count: Int,
         artboardHandles: LongArray,
         stateMachineHandles: LongArray,
         viewportXs: IntArray,
@@ -2193,6 +2194,7 @@ class CommandQueue(
         surface.renderTargetPointer.pointer,
         surface.width,
         surface.height,
+        count,
         artboardHandles,
         stateMachineHandles,
         viewportXs,
