@@ -2308,12 +2308,8 @@ extern "C"
         auto surfaceClearColor = static_cast<uint32_t>(jSurfaceClearColor);
 
         jint count = env->GetArrayLength(jArtboardHandles);
-        if (count == 0)
-        {
-            return;
-        }
 
-        // Copy all array data from JNI before entering the draw lambda.
+        // Copy array data from JNI before entering the draw lambda.
         std::vector<jlong> artboardHandles(count);
         std::vector<jlong> smHandles(count);
         std::vector<jint> viewportXs(count);
@@ -2325,21 +2321,24 @@ extern "C"
         std::vector<jfloat> scaleFactors(count);
         std::vector<jint> clearColors(count);
 
-        env->GetLongArrayRegion(jArtboardHandles, 0, count,
-                                artboardHandles.data());
-        env->GetLongArrayRegion(jStateMachineHandles, 0, count,
-                                smHandles.data());
-        env->GetIntArrayRegion(jViewportXs, 0, count, viewportXs.data());
-        env->GetIntArrayRegion(jViewportYs, 0, count, viewportYs.data());
-        env->GetIntArrayRegion(jViewportWidths, 0, count,
-                               viewportWidths.data());
-        env->GetIntArrayRegion(jViewportHeights, 0, count,
-                               viewportHeights.data());
-        env->GetByteArrayRegion(jFits, 0, count, fits.data());
-        env->GetByteArrayRegion(jAlignments, 0, count, alignments.data());
-        env->GetFloatArrayRegion(jScaleFactors, 0, count,
-                                 scaleFactors.data());
-        env->GetIntArrayRegion(jClearColors, 0, count, clearColors.data());
+        if (count > 0)
+        {
+            env->GetLongArrayRegion(jArtboardHandles, 0, count,
+                                    artboardHandles.data());
+            env->GetLongArrayRegion(jStateMachineHandles, 0, count,
+                                    smHandles.data());
+            env->GetIntArrayRegion(jViewportXs, 0, count, viewportXs.data());
+            env->GetIntArrayRegion(jViewportYs, 0, count, viewportYs.data());
+            env->GetIntArrayRegion(jViewportWidths, 0, count,
+                                   viewportWidths.data());
+            env->GetIntArrayRegion(jViewportHeights, 0, count,
+                                   viewportHeights.data());
+            env->GetByteArrayRegion(jFits, 0, count, fits.data());
+            env->GetByteArrayRegion(jAlignments, 0, count, alignments.data());
+            env->GetFloatArrayRegion(jScaleFactors, 0, count,
+                                     scaleFactors.data());
+            env->GetIntArrayRegion(jClearColors, 0, count, clearColors.data());
+        }
 
         auto drawWork = [commandQueue,
                          renderContext,
@@ -2361,14 +2360,17 @@ extern "C"
                          clearColors = std::move(clearColors)](
                             rive::DrawKey drawKey,
                             rive::CommandServer* server) {
-            // Make the EGL context current.
+            // Always make the EGL context current — even with 0 items.
+            // Skipping this on Adreno GPUs causes the GL context to go
+            // stale when items temporarily unregister (e.g. screen
+            // transitions), and subsequent draws fail silently.
             renderContext->beginFrame(nativeSurface);
 
             auto factory =
                 reinterpret_cast<CommandServerFactory*>(server->factory());
             auto riveContext = factory->getRenderContext()->riveContext.get();
 
-            // Begin a single frame for the entire batch.
+            // Clear the surface every frame to keep it transparent.
             riveContext->beginFrame(rive::gpu::RenderContext::FrameDescriptor{
                 .renderTargetWidth = static_cast<uint32_t>(surfaceWidth),
                 .renderTargetHeight = static_cast<uint32_t>(surfaceHeight),
@@ -2376,45 +2378,48 @@ extern "C"
                 .clearColor = surfaceClearColor,
             });
 
-            auto renderer = rive::RiveRenderer(riveContext);
-
-            // Draw each item at its viewport position.
-            for (jint i = 0; i < count; ++i)
+            // Draw items only if we have any.
+            if (count > 0)
             {
-                auto artboard = server->getArtboardInstance(
-                    handleFromLong<rive::ArtboardHandle>(artboardHandles[i]));
-                if (artboard == nullptr)
+                auto renderer = rive::RiveRenderer(riveContext);
+
+                for (jint i = 0; i < count; ++i)
                 {
-                    continue;
+                    auto artboard = server->getArtboardInstance(
+                        handleFromLong<rive::ArtboardHandle>(
+                            artboardHandles[i]));
+                    if (artboard == nullptr)
+                    {
+                        continue;
+                    }
+
+                    auto fit = GetFit(static_cast<uint8_t>(fits[i]));
+                    auto alignment =
+                        GetAlignment(static_cast<uint8_t>(alignments[i]));
+                    auto scaleFactor =
+                        static_cast<float_t>(scaleFactors[i]);
+
+                    float x = static_cast<float_t>(viewportXs[i]);
+                    float y = static_cast<float_t>(viewportYs[i]);
+                    float w = static_cast<float_t>(viewportWidths[i]);
+                    float h = static_cast<float_t>(viewportHeights[i]);
+
+                    renderer.save();
+                    renderer.align(fit,
+                                   alignment,
+                                   rive::AABB(x, y, x + w, y + h),
+                                   artboard->bounds(),
+                                   scaleFactor);
+                    artboard->draw(&renderer);
+                    renderer.restore();
                 }
-
-                auto fit = GetFit(static_cast<uint8_t>(fits[i]));
-                auto alignment =
-                    GetAlignment(static_cast<uint8_t>(alignments[i]));
-                auto scaleFactor = static_cast<float_t>(scaleFactors[i]);
-
-                float x = static_cast<float_t>(viewportXs[i]);
-                float y = static_cast<float_t>(viewportYs[i]);
-                float w = static_cast<float_t>(viewportWidths[i]);
-                float h = static_cast<float_t>(viewportHeights[i]);
-
-                // Save/restore to isolate each item's transform.
-                renderer.save();
-                renderer.align(fit,
-                               alignment,
-                               rive::AABB(x, y, x + w, y + h),
-                               artboard->bounds(),
-                               scaleFactor);
-                artboard->draw(&renderer);
-                renderer.restore();
             }
 
-            // Single flush for the entire batch.
+            // Always flush + present to keep the EGL context alive.
             riveContext->flush({
                 .renderTarget = renderTarget,
             });
 
-            // Swap buffers once.
             renderContext->present(nativeSurface);
         };
         commandQueue->draw(handleFromLong<rive::DrawKey>(drawKey), drawWork);

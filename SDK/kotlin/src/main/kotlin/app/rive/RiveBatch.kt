@@ -121,7 +121,26 @@ class RiveBatchCoordinator {
      */
     internal fun fillBatchArrays(): Int {
         val count = items.size
-        if (count == 0) return 0
+        if (count == 0) {
+            // Reset to zero-length arrays so JNI GetArrayLength returns 0,
+            // not the previous capacity with stale freed handles.
+            if (capacity > 0) {
+                capacity = 0
+                artboardHandles = LongArray(0)
+                smHandles = LongArray(0)
+                viewportXs = IntArray(0)
+                viewportYs = IntArray(0)
+                viewportWidths = IntArray(0)
+                viewportHeights = IntArray(0)
+                fits = ByteArray(0)
+                alignments = ByteArray(0)
+                scaleFactors = FloatArray(0)
+                clearColors = IntArray(0)
+                smHandleRefs = arrayOfNulls(0)
+                snapshot = arrayOfNulls(0)
+            }
+            return 0
+        }
 
         // Only reallocate when count exceeds capacity or drops below half.
         if (count > capacity || count < capacity / 4) {
@@ -222,7 +241,6 @@ fun RiveBatchSurface(
                 }
 
                 val count = coordinator.fillBatchArrays()
-                if (count == 0) continue
 
                 // Advance all state machines.
                 for (j in 0 until count) {
@@ -230,6 +248,10 @@ fun RiveBatchSurface(
                     riveWorker.advanceStateMachine(smRef, deltaTime)
                 }
 
+                // Always call drawBatch — even with 0 items — to keep the
+                // EGL context active and clear the surface to transparent.
+                // Skipping this on Adreno GPUs causes the GL context to go
+                // stale, and subsequent draws after items re-register fail.
                 try {
                     riveWorker.drawBatch(
                         currentSurface,
