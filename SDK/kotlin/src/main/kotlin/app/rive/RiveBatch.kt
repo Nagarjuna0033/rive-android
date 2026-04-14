@@ -33,6 +33,7 @@ import app.rive.core.RiveSurface
 import app.rive.core.RiveWorker
 import app.rive.core.StateMachineHandle
 import kotlinx.coroutines.isActive
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
@@ -229,7 +230,7 @@ fun RiveBatchSurface(
         }
     }
 
-    // Render loop: advances state machines and draws all items each frame.
+    // Phase 1 — Continuous render loop: advances state machines and draws all items each frame.
     LaunchedEffect(lifecycleOwner, surface) {
         val currentSurface = surface ?: return@LaunchedEffect
         RiveLog.d(BATCH_DRAW_TAG) { "Starting batched render loop" }
@@ -281,6 +282,55 @@ fun RiveBatchSurface(
                 }
             }
         }
+    }
+
+    // Phase 2 — Correctness override: flush stale frames after item removal.
+    //
+    // Problem: withFrameNanos (animation callback) runs BEFORE recomposition
+    // in the Choreographer frame. When an item unregisters during recomposition,
+    // the render loop already committed a stale frame with the removed item.
+    // The TextureView buffer pipeline then shows this stale frame for 2-3 more
+    // frames (~33-50ms ghost).
+    //
+    // Fix: snapshotFlow fires AFTER recomposition, so it sees the correct
+    // (post-unregister) state. When count decreases while the surface is still
+    // active, we immediately re-render with the corrected item list, pushing
+    // a clean frame into the buffer pipeline to replace the stale one.
+    LaunchedEffect(surface, coordinator) {
+        val currentSurface = surface ?: return@LaunchedEffect
+        var previousCount = coordinator.itemCount
+
+        snapshotFlow { coordinator.itemCount }
+            .collect { newCount ->
+                if (newCount < previousCount && newCount > 0) {
+                    RiveLog.d(BATCH_DRAW_TAG) {
+                        "Item removed ($previousCount→$newCount), flushing stale frame"
+                    }
+                    val count = coordinator.fillBatchArrays()
+                    try {
+                        riveWorker.drawBatch(
+                            currentSurface,
+                            count,
+                            coordinator.artboardHandles,
+                            coordinator.smHandles,
+                            coordinator.viewportXs,
+                            coordinator.viewportYs,
+                            coordinator.viewportWidths,
+                            coordinator.viewportHeights,
+                            coordinator.fits,
+                            coordinator.alignments,
+                            coordinator.scaleFactors,
+                            coordinator.clearColors,
+                            surfaceClearColor,
+                        )
+                    } catch (e: Exception) {
+                        RiveLog.e(BATCH_DRAW_TAG) {
+                            "Correctness flush drawBatch failed: ${e.message}"
+                        }
+                    }
+                }
+                previousCount = newCount
+            }
     }
 
     // Track the surface's root position so items can compute relative offsets.
