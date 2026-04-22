@@ -196,6 +196,11 @@ class RiveBatchCoordinator {
 val LocalRiveBatchCoordinator = compositionLocalOf<RiveBatchCoordinator?> { null }
 
 /**
+ * CompositionLocal that provides the background [RiveBatchCoordinator] to child [RiveBatchItem]s.
+ */
+val LocalRiveBgBatchCoordinator = compositionLocalOf<RiveBatchCoordinator?> { null }
+
+/**
  * A shared rendering surface that batches all child [RiveBatchItem] draws into a single
  * GPU pass.
  *
@@ -218,9 +223,11 @@ fun RiveBatchSurface(
     content: @Composable () -> Unit,
 ) {
     val coordinator = remember { RiveBatchCoordinator() }
+    val bgCoordinator = remember { RiveBatchCoordinator() }
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var surface by remember { mutableStateOf<RiveSurface?>(null) }
+    var bgSurface by remember { mutableStateOf<RiveSurface?>(null) }
 
     // Cleanup: destroy the RiveSurface when it changes or on dispose.
     DisposableEffect(surface) {
@@ -230,7 +237,14 @@ fun RiveBatchSurface(
         }
     }
 
-    // Phase 1 — Continuous render loop: advances state machines and draws all items each frame.
+    DisposableEffect(bgSurface) {
+        val nonNullSurface = bgSurface ?: return@DisposableEffect onDispose { }
+        onDispose {
+            riveWorker.destroyRiveSurface(nonNullSurface)
+        }
+    }
+
+    // ── Foreground Phase 1 — Continuous render loop ──
     LaunchedEffect(lifecycleOwner, surface) {
         val currentSurface = surface ?: return@LaunchedEffect
         RiveLog.d(BATCH_DRAW_TAG) { "Starting batched render loop" }
@@ -284,7 +298,7 @@ fun RiveBatchSurface(
         }
     }
 
-    // Phase 2 — Correctness override: flush stale frames after item removal.
+    // ── Foreground Phase 2 — Correctness override ──
     //
     // Problem: withFrameNanos (animation callback) runs BEFORE recomposition
     // in the Choreographer frame. When an item unregisters during recomposition,
@@ -333,27 +347,109 @@ fun RiveBatchSurface(
             }
     }
 
+    // ── Background Phase 1 — Continuous render loop ──
+    LaunchedEffect(lifecycleOwner, bgSurface) {
+        val currentSurface = bgSurface ?: return@LaunchedEffect
+        RiveLog.d(BATCH_DRAW_TAG) { "Starting background batched render loop" }
+
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            var lastFrameTime = Duration.ZERO
+            while (isActive) {
+                val deltaTime = withFrameNanos { frameTimeNs ->
+                    val frameTime = frameTimeNs.nanoseconds
+                    val dt = if (lastFrameTime == Duration.ZERO) {
+                        Duration.ZERO
+                    } else {
+                        frameTime - lastFrameTime
+                    }
+                    lastFrameTime = frameTime
+                    dt
+                }
+
+                val count = bgCoordinator.fillBatchArrays()
+
+                // Advance all state machines.
+                for (j in 0 until count) {
+                    val smRef = bgCoordinator.smHandleRefs[j] ?: continue
+                    riveWorker.advanceStateMachine(smRef, deltaTime)
+                }
+
+                try {
+                    riveWorker.drawBatch(
+                        currentSurface,
+                        count,
+                        bgCoordinator.artboardHandles,
+                        bgCoordinator.smHandles,
+                        bgCoordinator.viewportXs,
+                        bgCoordinator.viewportYs,
+                        bgCoordinator.viewportWidths,
+                        bgCoordinator.viewportHeights,
+                        bgCoordinator.fits,
+                        bgCoordinator.alignments,
+                        bgCoordinator.scaleFactors,
+                        bgCoordinator.clearColors,
+                        surfaceClearColor,
+                    )
+                } catch (e: Exception) {
+                    RiveLog.e(BATCH_DRAW_TAG) { "Background drawBatch failed: ${e.message}" }
+                }
+            }
+        }
+    }
+
+    // ── Background Phase 2 — Correctness override ──
+    LaunchedEffect(bgSurface, bgCoordinator) {
+        val currentSurface = bgSurface ?: return@LaunchedEffect
+        var previousCount = bgCoordinator.itemCount
+
+        snapshotFlow { bgCoordinator.itemCount }
+            .collect { newCount ->
+                if (newCount < previousCount && newCount > 0) {
+                    RiveLog.d(BATCH_DRAW_TAG) {
+                        "Background item removed ($previousCount→$newCount), flushing stale frame"
+                    }
+                    val count = bgCoordinator.fillBatchArrays()
+                    try {
+                        riveWorker.drawBatch(
+                            currentSurface,
+                            count,
+                            bgCoordinator.artboardHandles,
+                            bgCoordinator.smHandles,
+                            bgCoordinator.viewportXs,
+                            bgCoordinator.viewportYs,
+                            bgCoordinator.viewportWidths,
+                            bgCoordinator.viewportHeights,
+                            bgCoordinator.fits,
+                            bgCoordinator.alignments,
+                            bgCoordinator.scaleFactors,
+                            bgCoordinator.clearColors,
+                            surfaceClearColor,
+                        )
+                    } catch (e: Exception) {
+                        RiveLog.e(BATCH_DRAW_TAG) {
+                            "Background correctness flush failed: ${e.message}"
+                        }
+                    }
+                }
+                previousCount = newCount
+            }
+    }
+
     // Track the surface's root position so items can compute relative offsets.
     val positionTrackingModifier = modifier
         .onGloballyPositioned { coords ->
             val pos = coords.positionInRoot()
             coordinator.surfaceRootX = pos.x
             coordinator.surfaceRootY = pos.y
+            bgCoordinator.surfaceRootX = pos.x
+            bgCoordinator.surfaceRootY = pos.y
         }
 
     Layout(
         modifier = positionTrackingModifier,
         content = {
-            // Provide the coordinator to children and render content FIRST (behind).
-            CompositionLocalProvider(LocalRiveBatchCoordinator provides coordinator) {
-                content()
-            }
-
-            // Single TextureView SECOND (on top as transparent overlay).
-            // isOpaque = false means only Rive items are visible; rest is transparent.
-            // Auto-hide when no items are registered to prevent stale frame persistence
-            // in the TextureView buffer pipeline during tab transitions.
-            val hasItems = coordinator.itemCount > 0
+            // Layer 1 (bottom): Background TextureView
+            val hasBgItems = bgCoordinator.itemCount > 0
             AndroidView(
                 factory = { context: Context ->
                     TextureView(context).apply {
@@ -365,7 +461,60 @@ fun RiveBatchSurface(
                                 height: Int
                             ) {
                                 RiveLog.d(BATCH_TAG) {
-                                    "Batch surface texture available ($width x $height)"
+                                    "Background batch surface texture available ($width x $height)"
+                                }
+                                bgSurface = riveWorker.createRiveSurface(newSurfaceTexture)
+                            }
+
+                            override fun onSurfaceTextureDestroyed(
+                                destroyedSurfaceTexture: SurfaceTexture
+                            ): Boolean {
+                                RiveLog.d(BATCH_TAG) { "Background batch surface texture destroyed" }
+                                bgSurface = null
+                                return false
+                            }
+
+                            override fun onSurfaceTextureSizeChanged(
+                                surfaceTexture: SurfaceTexture,
+                                width: Int,
+                                height: Int
+                            ) {
+                                RiveLog.d(BATCH_TAG) {
+                                    "Background batch surface texture size changed ($width x $height)"
+                                }
+                            }
+
+                            override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) {}
+                        }
+                    }
+                },
+                update = { textureView ->
+                    textureView.visibility = if (hasBgItems) View.VISIBLE else View.INVISIBLE
+                },
+            )
+
+            // Layer 2 (middle): Content with both CompositionLocals
+            CompositionLocalProvider(
+                LocalRiveBatchCoordinator provides coordinator,
+                LocalRiveBgBatchCoordinator provides bgCoordinator,
+            ) {
+                content()
+            }
+
+            // Layer 3 (top): Foreground TextureView
+            val hasFgItems = coordinator.itemCount > 0
+            AndroidView(
+                factory = { context: Context ->
+                    TextureView(context).apply {
+                        isOpaque = false
+                        surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                            override fun onSurfaceTextureAvailable(
+                                newSurfaceTexture: SurfaceTexture,
+                                width: Int,
+                                height: Int
+                            ) {
+                                RiveLog.d(BATCH_TAG) {
+                                    "Foreground batch surface texture available ($width x $height)"
                                 }
                                 surface = riveWorker.createRiveSurface(newSurfaceTexture)
                             }
@@ -373,7 +522,7 @@ fun RiveBatchSurface(
                             override fun onSurfaceTextureDestroyed(
                                 destroyedSurfaceTexture: SurfaceTexture
                             ): Boolean {
-                                RiveLog.d(BATCH_TAG) { "Batch surface texture destroyed" }
+                                RiveLog.d(BATCH_TAG) { "Foreground batch surface texture destroyed" }
                                 surface = null
                                 return false
                             }
@@ -384,7 +533,7 @@ fun RiveBatchSurface(
                                 height: Int
                             ) {
                                 RiveLog.d(BATCH_TAG) {
-                                    "Batch surface texture size changed ($width x $height)"
+                                    "Foreground batch surface texture size changed ($width x $height)"
                                 }
                             }
 
@@ -393,7 +542,7 @@ fun RiveBatchSurface(
                     }
                 },
                 update = { textureView ->
-                    textureView.visibility = if (hasItems) View.VISIBLE else View.INVISIBLE
+                    textureView.visibility = if (hasFgItems) View.VISIBLE else View.INVISIBLE
                 },
             )
         }
@@ -416,6 +565,7 @@ fun RiveBatchSurface(
  * @param viewModelInstance Optional [ViewModelInstance] to bind to the state machine.
  * @param fit How the artboard should be fitted within this item's bounds.
  * @param backgroundColor Per-item clear color before drawing.
+ * @param background If true, renders on the background layer (behind content).
  */
 @Composable
 fun RiveBatchItem(
@@ -424,9 +574,15 @@ fun RiveBatchItem(
     viewModelInstance: ViewModelInstance? = null,
     fit: Fit = Fit.Contain(),
     backgroundColor: Int = Color.Transparent.toArgb(),
+    background: Boolean = false,
 ) {
-    val coordinator = LocalRiveBatchCoordinator.current
-        ?: error("RiveBatchItem must be placed inside a RiveBatchSurface")
+    val fgCoordinator = LocalRiveBatchCoordinator.current
+    val bgCoordinator = LocalRiveBgBatchCoordinator.current
+    val coordinator = if (background) {
+        bgCoordinator ?: error("RiveBatchItem must be placed inside a RiveBatchSurface")
+    } else {
+        fgCoordinator ?: error("RiveBatchItem must be placed inside a RiveBatchSurface")
+    }
 
     val riveWorker = file.riveWorker
     val artboardToUse = rememberArtboard(file)
@@ -442,10 +598,11 @@ fun RiveBatchItem(
         viewModelInstance.dirtyFlow.collect { /* no-op, just keeps collection alive */ }
     }
 
-    // Unregister when leaving composition.
-    DisposableEffect(stateMachineHandle) {
+    // Unregister from both coordinators when leaving composition or when background changes.
+    DisposableEffect(stateMachineHandle, background) {
         onDispose {
-            coordinator.unregister(stateMachineHandle)
+            fgCoordinator?.unregister(stateMachineHandle)
+            bgCoordinator?.unregister(stateMachineHandle)
         }
     }
 
