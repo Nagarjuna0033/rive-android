@@ -67,7 +67,7 @@ class ViewModelInstance internal constructor(
         extraBufferCapacity = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
-    val dirtyFlow: SharedFlow<Unit> = _dirtyFlow
+    internal val dirtyFlow: SharedFlow<Unit> = _dirtyFlow
 
     private val numberFlows = mutableMapOf<String, Flow<Float>>()
     private val stringFlows = mutableMapOf<String, Flow<String>>()
