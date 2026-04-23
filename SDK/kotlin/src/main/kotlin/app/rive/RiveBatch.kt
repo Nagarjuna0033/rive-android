@@ -32,10 +32,12 @@ import app.rive.core.CommandQueue
 import app.rive.core.RiveSurface
 import app.rive.core.RiveWorker
 import app.rive.core.StateMachineHandle
+import android.view.Choreographer
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.resume
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.nanoseconds
 
@@ -238,16 +240,21 @@ fun RiveBatchSurface(
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             var lastFrameTime = Duration.ZERO
             while (isActive) {
-                val deltaTime = withFrameNanos { frameTimeNs ->
-                    val frameTime = frameTimeNs.nanoseconds
-                    val dt = if (lastFrameTime == Duration.ZERO) {
-                        Duration.ZERO
-                    } else {
-                        frameTime - lastFrameTime
+                // Use Choreographer directly instead of withFrameNanos.
+                // withFrameNanos relies on Compose's MonotonicFrameClock which
+                // does not pump frames inside Dialog windows (separate ComposeView).
+                val frameTimeNs = suspendCancellableCoroutine<Long> { cont ->
+                    Choreographer.getInstance().postFrameCallback { time ->
+                        cont.resume(time)
                     }
-                    lastFrameTime = frameTime
-                    dt
                 }
+                val frameTime = frameTimeNs.nanoseconds
+                val deltaTime = if (lastFrameTime == Duration.ZERO) {
+                    Duration.ZERO
+                } else {
+                    frameTime - lastFrameTime
+                }
+                lastFrameTime = frameTime
 
                 val count = coordinator.fillBatchArrays()
 
