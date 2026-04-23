@@ -234,11 +234,17 @@ fun RiveBatchSurface(
 
     // Phase 1 — Continuous render loop: advances state machines and draws all items each frame.
     LaunchedEffect(lifecycleOwner, surface) {
-        val currentSurface = surface ?: return@LaunchedEffect
+        val currentSurface = surface ?: run {
+            android.util.Log.d("Rive/BATCH", "[RENDER] surface is null, skipping render loop")
+            return@LaunchedEffect
+        }
+        android.util.Log.d("Rive/BATCH", "[RENDER] Starting batched render loop, surface=$currentSurface")
         RiveLog.d(BATCH_DRAW_TAG) { "Starting batched render loop" }
 
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            android.util.Log.d("Rive/BATCH", "[RENDER] RESUMED — entering frame loop")
             var lastFrameTime = Duration.ZERO
+            var frameCount = 0
             while (isActive) {
                 // Use Choreographer directly instead of withFrameNanos.
                 // withFrameNanos relies on Compose's MonotonicFrameClock which
@@ -255,8 +261,13 @@ fun RiveBatchSurface(
                     frameTime - lastFrameTime
                 }
                 lastFrameTime = frameTime
+                frameCount++
 
                 val count = coordinator.fillBatchArrays()
+
+                if (frameCount <= 10 || frameCount % 120 == 0) {
+                    android.util.Log.d("Rive/BATCH", "[RENDER] frame#$frameCount items=$count dt=$deltaTime")
+                }
 
                 // Advance all state machines.
                 for (j in 0 until count) {
@@ -285,6 +296,7 @@ fun RiveBatchSurface(
                         surfaceClearColor,
                     )
                 } catch (e: Exception) {
+                    android.util.Log.e("Rive/BATCH", "[RENDER] drawBatch failed: ${e.message}")
                     RiveLog.e(BATCH_DRAW_TAG) { "drawBatch failed: ${e.message}" }
                 }
             }
@@ -371,6 +383,7 @@ fun RiveBatchSurface(
                                 width: Int,
                                 height: Int
                             ) {
+                                android.util.Log.d("Rive/BATCH", "[SURFACE] available ${width}x${height}")
                                 RiveLog.d(BATCH_TAG) {
                                     "Batch surface texture available ($width x $height)"
                                 }
@@ -441,12 +454,21 @@ fun RiveBatchItem(
     val stateMachineToUse = rememberStateMachine(artboardToUse)
     val stateMachineHandle = stateMachineToUse.stateMachineHandle
 
+    android.util.Log.d("Rive/BATCH", "[ITEM] created artboard=${artboardHandle.handle} sm=${stateMachineHandle.handle} vmi=${viewModelInstance?.instanceHandle}")
+
     // Bind the view model instance to the state machine if provided.
     LaunchedEffect(stateMachineHandle, viewModelInstance) {
-        viewModelInstance ?: return@LaunchedEffect
+        viewModelInstance ?: run {
+            android.util.Log.d("Rive/BATCH", "[ITEM] No VMI to bind")
+            return@LaunchedEffect
+        }
+        android.util.Log.d("Rive/BATCH", "[ITEM] Binding VMI=${viewModelInstance.instanceHandle} to SM=${stateMachineHandle.handle}")
         riveWorker.bindViewModelInstance(stateMachineHandle, viewModelInstance.instanceHandle)
+        android.util.Log.d("Rive/BATCH", "[ITEM] VMI bound, collecting dirtyFlow")
         // Keep collecting dirty flow to stay responsive to VMI changes.
-        viewModelInstance.dirtyFlow.collect { /* no-op, just keeps collection alive */ }
+        viewModelInstance.dirtyFlow.collect {
+            android.util.Log.d("Rive/BATCH", "[ITEM] dirtyFlow fired")
+        }
     }
 
     // Unregister when leaving composition.
@@ -463,6 +485,7 @@ fun RiveBatchItem(
             val size = coords.size
             val relativeX = (rootPos.x - coordinator.surfaceRootX).toInt()
             val relativeY = (rootPos.y - coordinator.surfaceRootY).toInt()
+            android.util.Log.d("Rive/BATCH", "[ITEM] register pos=($relativeX,$relativeY) size=${size.width}x${size.height}")
             coordinator.register(
                 stateMachineHandle,
                 BatchItemDescriptor(
