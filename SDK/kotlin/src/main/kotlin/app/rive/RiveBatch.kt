@@ -447,6 +447,8 @@ fun RiveBatchSurface(
 fun RiveBatchItem(
     file: RiveFile,
     modifier: Modifier = Modifier,
+    artboard: Artboard? = null,
+    stateMachine: StateMachine? = null,
     viewModelInstance: ViewModelInstance? = null,
     fit: Fit = Fit.Contain(),
     backgroundColor: Int = Color.Transparent.toArgb(),
@@ -455,9 +457,9 @@ fun RiveBatchItem(
         ?: error("RiveBatchItem must be placed inside a RiveBatchSurface")
 
     val riveWorker = file.riveWorker
-    val artboardToUse = rememberArtboard(file)
+    val artboardToUse = artboard ?: rememberArtboard(file)
     val artboardHandle = artboardToUse.artboardHandle
-    val stateMachineToUse = rememberStateMachine(artboardToUse)
+    val stateMachineToUse = stateMachine ?: rememberStateMachine(artboardToUse)
     val stateMachineHandle = stateMachineToUse.stateMachineHandle
 
     android.util.Log.d("Rive/BATCH", "[ITEM] created artboard=${artboardHandle.handle} sm=${stateMachineHandle.handle} vmi=${viewModelInstance?.instanceHandle}")
