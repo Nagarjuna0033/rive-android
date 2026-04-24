@@ -269,10 +269,16 @@ fun RiveBatchSurface(
                     android.util.Log.d("Rive/BATCH", "[RENDER] frame#$frameCount items=$count dt=$deltaTime")
                 }
 
-                // Advance all state machines.
-                for (j in 0 until count) {
-                    val smRef = coordinator.smHandleRefs[j] ?: continue
-                    riveWorker.advanceStateMachine(smRef, deltaTime)
+                // Skip the very first frame (dt=0) for advancing state machines.
+                // The Rive runtime may consume triggers/inputs during advance(0)
+                // without processing state transitions, causing one-shot triggers
+                // to be silently lost.
+                if (deltaTime > Duration.ZERO) {
+                    // Advance all state machines.
+                    for (j in 0 until count) {
+                        val smRef = coordinator.smHandleRefs[j] ?: continue
+                        riveWorker.advanceStateMachine(smRef, deltaTime)
+                    }
                 }
 
                 // Always call drawBatch — even with 0 items — to keep the
